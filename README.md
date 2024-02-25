@@ -4,7 +4,8 @@ Export given table to JSON Lines file - The .Net 8 way
 
 ## Description
 
-TODO
+Supported databases:
+  * MySQL (<=8.3)
 
 ## Getting Started
 
