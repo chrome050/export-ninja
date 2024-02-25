@@ -1,6 +1,6 @@
 # Export Ninja
 
-Export given table to JSON Lines file - The .Net 8 way
+CLI tool to export a database table to JSON Lines file - The .Net 8 way
 
 ## Description
 
