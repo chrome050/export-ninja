@@ -2,11 +2,7 @@ using System.CommandLine;
 using System.Data;
 using System.Data.Common;
 using System.Text.Json;
-using Google.Protobuf.WellKnownTypes;
-using System.Xml.Linq;
-using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.Extensions.Configuration;
-using MySql.Data.MySqlClient;
 using Serilog;
 
 namespace ExportNinja
