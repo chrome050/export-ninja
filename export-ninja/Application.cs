@@ -2,7 +2,11 @@ using System.CommandLine;
 using System.Data;
 using System.Data.Common;
 using System.Text.Json;
+using Google.Protobuf.WellKnownTypes;
+using System.Xml.Linq;
+using Microsoft.EntityFrameworkCore.Metadata.Internal;
 using Microsoft.Extensions.Configuration;
+using MySql.Data.MySqlClient;
 using Serilog;
 
 namespace ExportNinja
@@ -23,15 +27,16 @@ namespace ExportNinja
         {
             int returnCode = 0;
 
-            var tableNameOption = new Option<string>("--table")
+            var tableNameOption = new Option<string[]>("--table")
             {
-                Description = "Table name",
+                Description = "Table name(s) [space seperated]",
+                AllowMultipleArgumentsPerToken = true,
                 IsRequired = true
             };
 
-            var fileNameOption = new Option<string>("--fileName")
+            var fileNamePrefixOption = new Option<string>("--fileNamePrefix")
             {
-                Description = "File name. If not provided, table name is used.",
+                Description = "File name prefix.",
                 IsRequired = false
             };
 
@@ -43,17 +48,17 @@ namespace ExportNinja
 
             var rootCommand = new RootCommand("Export Ninja - Export given table to JSON Lines file");
             rootCommand.AddOption(tableNameOption);
-            rootCommand.AddOption(fileNameOption);
+            rootCommand.AddOption(fileNamePrefixOption);
             rootCommand.AddOption(databaseTypeOption);
 
             rootCommand.SetHandler(async (context) =>
             {
-                var tableNameOptionValue = context.ParseResult.GetValueForOption(tableNameOption);
-                var fileNameOptionValue = context.ParseResult.GetValueForOption(fileNameOption);
+                var tableNameOptionValues = context.ParseResult.GetValueForOption<string[]>(tableNameOption);
+                var fileNamePrefixOptionValue = context.ParseResult.GetValueForOption(fileNamePrefixOption);
                 var databaseType = context.ParseResult.GetValueForOption(databaseTypeOption);
 
                 var token = context.GetCancellationToken();
-                returnCode = await RunApplicationAsync(tableNameOptionValue, fileNameOptionValue, databaseType, token);
+                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseType, token);
             });
 
             await rootCommand.InvokeAsync(args);
@@ -61,63 +66,78 @@ namespace ExportNinja
             return returnCode;
         }
 
-        private async Task<int> RunApplicationAsync(string? tableNameArg, string? fileNameArg, string? databaseType, CancellationToken cancellationToken)
+        private async Task<int> RunApplicationAsync(string[] tableNameArg, string? fileNamePrefixArg, string? databaseType, CancellationToken cancellationToken)
         {
             factory = DbProviderFactories.GetFactory(databaseType);
 
-            Log.Information($"Start exporting {tableNameArg}");
+            var parallelOptions = new ParallelOptions()
+            {
+                CancellationToken = cancellationToken,
+                MaxDegreeOfParallelism = Environment.ProcessorCount
+            };
 
             var exportFolder = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "exports");
 
             Directory.CreateDirectory(exportFolder);
 
-            var filePath = Path.Join(exportFolder, $"{fileNameArg ?? tableNameArg}-{DateTime.UtcNow:yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fff'Z'}.jsonl");
-
             try
             {
-                using (var connection = factory.CreateConnection())
+                await Parallel.ForEachAsync(tableNameArg, cancellationToken, async (tableName, cancellationToken) =>
                 {
-                    if(connection ==  null)
+                    Log.Information($"Start exporting {tableName}");
+
+                    var filePath = Path.Join(exportFolder, $"{fileNamePrefixArg ?? fileNamePrefixArg + "_"}{tableName}-{DateTime.UtcNow:yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fff'Z'}.jsonl");
+
+                    using (var connection = factory.CreateConnection())
                     {
-                        throw new InvalidOperationException("Can not create connection to database.");
-                    }
-
-                    connection.ConnectionString = _config.GetConnectionString("Database");
-                    await connection.OpenAsync();
-
-                    using (var command = connection.CreateCommand())
-                    {
-                        command.CommandText = $"SELECT * FROM {tableNameArg}";
-                        command.CommandType = CommandType.Text;
-
-                        using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
+                        if (connection == null)
                         {
-                            using (var file = File.CreateText(filePath))
+                            throw new InvalidOperationException("Can not create connection to database.");
+                        }
+
+                        connection.ConnectionString = _config.GetConnectionString("Database");
+                        await connection.OpenAsync();
+
+                        using (var command = connection.CreateCommand())
+                        {
+                            command.CommandText = "SELECT * FROM @TableName";
+                            command.CommandType = CommandType.Text;
+
+                            var parameter = command.CreateParameter();
+                            parameter.ParameterName = "@TableName";
+                            parameter.Value = tableName;
+                            parameter.DbType = DbType.String;
+                            command.Parameters.Add(parameter);
+
+                            using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
                             {
-                                var tmpObj = new Dictionary<string, object>();
-                                string columnName;
-                                object columnValue;
-
-                                while (await reader.ReadAsync(cancellationToken))
+                                using (var file = File.CreateText(filePath))
                                 {
-                                    if (reader.HasRows)
-                                    {
-                                        for (int i = 0; i < reader.FieldCount; i++)
-                                        {
-                                            columnName = reader.GetName(i);
-                                            columnValue = reader.GetValue(i);
-                                            tmpObj[columnName] = columnValue;
-                                        }
+                                    var tmpObj = new Dictionary<string, object>();
+                                    string columnName;
+                                    object columnValue;
 
-                                        await file.WriteLineAsync(JsonSerializer.Serialize(tmpObj));
+                                    while (await reader.ReadAsync(cancellationToken))
+                                    {
+                                        if (reader.HasRows)
+                                        {
+                                            for (int i = 0; i < reader.FieldCount; i++)
+                                            {
+                                                columnName = reader.GetName(i);
+                                                columnValue = reader.GetValue(i);
+                                                tmpObj[columnName] = columnValue;
+                                            }
+
+                                            await file.WriteLineAsync(JsonSerializer.Serialize(tmpObj));
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                Log.Information($"DONE: exporting {tableNameArg} to {filePath}");
+                    Log.Information($"DONE: exporting {tableName} to {filePath}");
+                });
 
                 return 0;
             }
