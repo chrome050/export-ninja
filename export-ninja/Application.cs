@@ -42,7 +42,7 @@ namespace ExportNinja
                 IsRequired = true
             }.FromAmong("mysql", "oracle");
 
-            var rootCommand = new RootCommand("Export Ninja - Export given table to JSON Lines file");
+            var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
             rootCommand.AddOption(databaseTypeOption);
