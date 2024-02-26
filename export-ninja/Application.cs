@@ -82,6 +82,9 @@ namespace ExportNinja
                 {
                     Log.Information($"Start exporting {tableName}");
 
+                    var builder = factory.CreateCommandBuilder();
+                    string escapedTableName = builder.QuoteIdentifier(tableName);
+
                     var filePath = Path.Join(exportFolder, $"{fileNamePrefixArg ?? fileNamePrefixArg + "_"}{tableName}-{DateTime.UtcNow:yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fff'Z'}.jsonl");
 
                     using (var connection = factory.CreateConnection())
@@ -96,14 +99,7 @@ namespace ExportNinja
 
                         using (var command = connection.CreateCommand())
                         {
-                            command.CommandText = "SELECT * FROM @TableName";
-                            command.CommandType = CommandType.Text;
-
-                            var parameter = command.CreateParameter();
-                            parameter.ParameterName = "@TableName";
-                            parameter.Value = tableName;
-                            parameter.DbType = DbType.String;
-                            command.Parameters.Add(parameter);
+                            command.CommandText = $@"SELECT * FROM {escapedTableName}";
 
                             using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
                             {
