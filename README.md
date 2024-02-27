@@ -31,6 +31,7 @@ Options:
   --table <table> (REQUIRED)         Table name(s) [space seperated]
   --fileNamePrefix <fileNamePrefix>  File name prefix.
   --type <mysql|oracle> (REQUIRED)   Database type
+  --path <path>                      Path where files should be stored. [Default: ./exports]
   --version                          Show version information
   -?, -h, --help                     Show help and usage information
 ```
