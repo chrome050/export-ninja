@@ -91,7 +91,7 @@ namespace ExportNinja
                         fileName = fileNamePrefixArg + "_" + tableName;
                     }
 
-                    var filePath = Path.Join(exportFolder, $"{fileName}-{DateTime.UtcNow:yyyy'-'MM'-'dd'T'HH':'mm':'ss'.'fff'Z'}.jsonl");
+                    var filePath = Path.Join(exportFolder, $"{fileName}-{DateTime.UtcNow:yyyyMMddTHHmmss}.jsonl");
 
                     using (var connection = factory.CreateConnection())
                     {
