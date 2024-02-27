@@ -1,8 +1,8 @@
 using System.CommandLine;
 using System.Data;
 using System.Data.Common;
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using Newtonsoft.Json;
 using Serilog;
 
 namespace ExportNinja
@@ -42,19 +42,27 @@ namespace ExportNinja
                 IsRequired = true
             }.FromAmong("mysql", "oracle");
 
+            var fileExportPathOption = new Option<string>("--path")
+            {
+                Description = "Path where files should be stored. [Default: ./exports]",
+                IsRequired = false
+            };
+
             var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
             rootCommand.AddOption(databaseTypeOption);
+            rootCommand.AddOption(fileExportPathOption);
 
             rootCommand.SetHandler(async (context) =>
             {
                 var tableNameOptionValues = context.ParseResult.GetValueForOption<string[]>(tableNameOption);
                 var fileNamePrefixOptionValue = context.ParseResult.GetValueForOption(fileNamePrefixOption);
-                var databaseType = context.ParseResult.GetValueForOption(databaseTypeOption);
+                var databaseTypeOptionValue = context.ParseResult.GetValueForOption(databaseTypeOption);
+                var fileExportPathOptionValue = context.ParseResult.GetValueForOption(fileExportPathOption);
 
                 var token = context.GetCancellationToken();
-                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseType, token);
+                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, token);
             });
 
             await rootCommand.InvokeAsync(args);
@@ -62,7 +70,7 @@ namespace ExportNinja
             return returnCode;
         }
 
-        private async Task<int> RunApplicationAsync(string[] tableNameArg, string? fileNamePrefixArg, string? databaseType, CancellationToken cancellationToken)
+        private async Task<int> RunApplicationAsync(string[] tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, CancellationToken cancellationToken)
         {
             factory = DbProviderFactories.GetFactory(databaseType);
 
@@ -72,7 +80,8 @@ namespace ExportNinja
                 MaxDegreeOfParallelism = Environment.ProcessorCount
             };
 
-            var exportFolder = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "exports");
+            var defaultExportFolder = Path.Join(AppDomain.CurrentDomain.BaseDirectory, "exports");
+            var exportFolder = exportPath ?? defaultExportFolder;
 
             Directory.CreateDirectory(exportFolder);
 
@@ -126,7 +135,7 @@ namespace ExportNinja
                                                 tmpObj[columnName] = columnValue;
                                             }
 
-                                            await file.WriteLineAsync(JsonSerializer.Serialize(tmpObj));
+                                            await file.WriteLineAsync(JsonConvert.SerializeObject(tmpObj));
                                         }
                                     }
                                 }
