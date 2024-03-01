@@ -10,13 +10,9 @@ Supported databases:
 
 ## Getting Started
 
-### Dependencies
-
-.Net 8
-
 ### Installing
 
-TODO
+Just call export-ninja binary
 
 ### Executing program
 
@@ -28,10 +24,12 @@ Usage:
   export-ninja [options]
 
 Options:
-  --table <table> (REQUIRED)         Table name(s) [space seperated]
-  --fileNamePrefix <fileNamePrefix>  File name prefix.
-  --type <mysql|oracle> (REQUIRED)   Database type
-  --path <path>                      Path where files should be stored. [Default: ./exports]
-  --version                          Show version information
-  -?, -h, --help                     Show help and usage information
+  --table <table> (REQUIRED)             Table name(s) [space seperated]
+  --fileNamePrefix <fileNamePrefix>      File name prefix.
+  --type <mysql|oracle> (REQUIRED)       Database type
+  --path <path>                          Path where files should be stored. [Default: ./exports]
+  --connectionString <connectionString>  DB connection string [You can also use appsettings.json]
+  --withTimeStamp                        Option to add a time stamp suffix to exported files
+  --version                              Show version information
+  -?, -h, --help                         Show help and usage information
 ```
