@@ -48,21 +48,29 @@ namespace ExportNinja
                 IsRequired = false
             };
 
+            var connectionStringOption = new Option<string>("--connectionString")
+            {
+                Description = "DB connection string [You can also use appsettings.json]",
+                IsRequired = false
+            };
+
             var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
             rootCommand.AddOption(databaseTypeOption);
             rootCommand.AddOption(fileExportPathOption);
+            rootCommand.AddOption(connectionStringOption);
 
             rootCommand.SetHandler(async (context) =>
             {
-                var tableNameOptionValues = context.ParseResult.GetValueForOption<string[]>(tableNameOption);
+                var tableNameOptionValues = context.ParseResult.GetValueForOption(tableNameOption);
                 var fileNamePrefixOptionValue = context.ParseResult.GetValueForOption(fileNamePrefixOption);
                 var databaseTypeOptionValue = context.ParseResult.GetValueForOption(databaseTypeOption);
                 var fileExportPathOptionValue = context.ParseResult.GetValueForOption(fileExportPathOption);
+                var connectionStringOptionValue = context.ParseResult.GetValueForOption(connectionStringOption);
 
                 var token = context.GetCancellationToken();
-                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, token);
+                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, connectionStringOptionValue, token);
             });
 
             await rootCommand.InvokeAsync(args);
@@ -70,8 +78,13 @@ namespace ExportNinja
             return returnCode;
         }
 
-        private async Task<int> RunApplicationAsync(string[] tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, CancellationToken cancellationToken)
+        private async Task<int> RunApplicationAsync(string[]? tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, string? connectionString, CancellationToken cancellationToken)
         {
+            if(tableNameArg == null || databaseType == null)
+            {
+                throw new InvalidDataException("Please provide table name or database type");
+            }
+
             factory = DbProviderFactories.GetFactory(databaseType);
 
             var parallelOptions = new ParallelOptions()
@@ -109,7 +122,7 @@ namespace ExportNinja
                             throw new InvalidOperationException("Can not create connection to database.");
                         }
 
-                        connection.ConnectionString = _config.GetConnectionString("Database");
+                        connection.ConnectionString = connectionString ?? _config.GetConnectionString("Database");
                         await connection.OpenAsync();
 
                         using (var command = connection.CreateCommand())
