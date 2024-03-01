@@ -54,12 +54,19 @@ namespace ExportNinja
                 IsRequired = false
             };
 
+            var withTimeStampOption = new Option<bool>("--withTimeStamp")
+            {
+                Description = "Option to add a time stamp suffix to exported files",
+                IsRequired = false
+            };
+
             var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
             rootCommand.AddOption(databaseTypeOption);
             rootCommand.AddOption(fileExportPathOption);
             rootCommand.AddOption(connectionStringOption);
+            rootCommand.AddOption(withTimeStampOption);
 
             rootCommand.SetHandler(async (context) =>
             {
@@ -68,9 +75,10 @@ namespace ExportNinja
                 var databaseTypeOptionValue = context.ParseResult.GetValueForOption(databaseTypeOption);
                 var fileExportPathOptionValue = context.ParseResult.GetValueForOption(fileExportPathOption);
                 var connectionStringOptionValue = context.ParseResult.GetValueForOption(connectionStringOption);
+                var withTimeStampOptionValue = context.ParseResult.GetValueForOption(withTimeStampOption);
 
                 var token = context.GetCancellationToken();
-                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, connectionStringOptionValue, token);
+                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, connectionStringOptionValue, withTimeStampOptionValue, token);
             });
 
             await rootCommand.InvokeAsync(args);
@@ -78,7 +86,7 @@ namespace ExportNinja
             return returnCode;
         }
 
-        private async Task<int> RunApplicationAsync(string[]? tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, string? connectionString, CancellationToken cancellationToken)
+        private async Task<int> RunApplicationAsync(string[]? tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, string? connectionString, bool withTimeStamp, CancellationToken cancellationToken)
         {
             if(tableNameArg == null || databaseType == null)
             {
@@ -113,7 +121,12 @@ namespace ExportNinja
                         fileName = fileNamePrefixArg + "_" + tableName;
                     }
 
-                    var filePath = Path.Join(exportFolder, $"{fileName}-{DateTime.UtcNow:yyyyMMddTHHmmss}.jsonl");
+                    if(withTimeStamp)
+                    {
+                        fileName = $"{fileName}_{DateTime.UtcNow:yyyyMMddTHHmmss}";
+                    }
+
+                    var filePath = Path.Join(exportFolder, $"{fileName}.jsonl");
 
                     using (var connection = factory.CreateConnection())
                     {
