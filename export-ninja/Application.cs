@@ -2,7 +2,9 @@ using System.CommandLine;
 using System.Data;
 using System.Data.Common;
 using Microsoft.Extensions.Configuration;
+using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
+using Oracle.ManagedDataAccess.Client;
 using Serilog;
 
 namespace ExportNinja
@@ -12,6 +14,10 @@ namespace ExportNinja
         private readonly IConfiguration _config;
 
         private DbProviderFactory factory;
+
+        private List<int> oracleErrorsToSoftFail = new List<int>() { 942 };
+
+        private List<int> mysqlErrorsToSoftFail = new List<int> { 1146 };
 
         public Application(IConfiguration config)
         {
@@ -60,6 +66,12 @@ namespace ExportNinja
                 IsRequired = false
             };
 
+            var softFailTableNotFound = new Option<bool>("--softFail")
+            {
+                Description = "Only a warning is shown, when given table not found in DB. Skipping.",
+                IsRequired = false
+            };
+
             var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
@@ -67,6 +79,7 @@ namespace ExportNinja
             rootCommand.AddOption(fileExportPathOption);
             rootCommand.AddOption(connectionStringOption);
             rootCommand.AddOption(withTimeStampOption);
+            rootCommand.AddOption(softFailTableNotFound);
 
             rootCommand.SetHandler(async (context) =>
             {
@@ -76,9 +89,18 @@ namespace ExportNinja
                 var fileExportPathOptionValue = context.ParseResult.GetValueForOption(fileExportPathOption);
                 var connectionStringOptionValue = context.ParseResult.GetValueForOption(connectionStringOption);
                 var withTimeStampOptionValue = context.ParseResult.GetValueForOption(withTimeStampOption);
+                var softFailTableNotFoundValue = context.ParseResult.GetValueForOption(softFailTableNotFound);
 
-                var token = context.GetCancellationToken();
-                returnCode = await RunApplicationAsync(tableNameOptionValues, fileNamePrefixOptionValue, databaseTypeOptionValue, fileExportPathOptionValue, connectionStringOptionValue, withTimeStampOptionValue, token);
+                var ct = context.GetCancellationToken();
+                returnCode = await RunApplicationAsync(
+                    tableNameOptionValues,
+                    fileNamePrefixOptionValue,
+                    databaseTypeOptionValue,
+                    fileExportPathOptionValue,
+                    connectionStringOptionValue,
+                    withTimeStampOptionValue,
+                    softFailTableNotFoundValue,
+                    ct);
             });
 
             await rootCommand.InvokeAsync(args);
@@ -86,7 +108,44 @@ namespace ExportNinja
             return returnCode;
         }
 
-        private async Task<int> RunApplicationAsync(string[]? tableNameArg, string? fileNamePrefixArg, string? databaseType, string? exportPath, string? connectionString, bool withTimeStamp, CancellationToken cancellationToken)
+        private void HandleException(Exception ex, string tableName, bool softFailTableNotFound)
+        {
+            if (ex is OracleException)
+            {
+                var oEx = ex as OracleException;
+                if (softFailTableNotFound && oracleErrorsToSoftFail.Contains(oEx.Number))
+                {
+                    Log.Warning($"Warning: Soft fail. Table: {tableName} Msg: {oEx.Message}");
+                }
+                else
+                {
+                    throw ex;
+                }
+            }
+
+            if (ex is MySqlException)
+            {
+                var mEx = ex as MySqlException;
+                if (softFailTableNotFound && mysqlErrorsToSoftFail.Contains(mEx.Number))
+                {
+                    Log.Warning($"Warning: Soft fail. Table: {tableName} Msg: {mEx.Message}");
+                }
+                else
+                {
+                    throw ex;
+                }
+            }
+        }
+
+        private async Task<int> RunApplicationAsync(
+            string[]? tableNameArg,
+            string? fileNamePrefixArg,
+            string? databaseType,
+            string? exportPath,
+            string? connectionString,
+            bool withTimeStamp,
+            bool? softFailTableNotFound,
+            CancellationToken cancellationToken)
         {
             if(tableNameArg == null || databaseType == null)
             {
@@ -110,73 +169,80 @@ namespace ExportNinja
             {
                 await Parallel.ForEachAsync(tableNameArg, cancellationToken, async (tableName, cancellationToken) =>
                 {
-                    Log.Information($"Start exporting {tableName}");
-
-                    var builder = factory.CreateCommandBuilder();
-                    string escapedTableName = builder.QuoteIdentifier(tableName);
-
-                    var fileName = tableName;
-                    if (fileNamePrefixArg != null)
+                    try
                     {
-                        fileName = fileNamePrefixArg + "_" + tableName;
-                    }
+                        Log.Information($"Start exporting {tableName}");
 
-                    if(withTimeStamp)
-                    {
-                        fileName = $"{fileName}_{DateTime.UtcNow:yyyyMMddTHHmmss}";
-                    }
+                        var builder = factory.CreateCommandBuilder();
+                        string escapedTableName = builder.QuoteIdentifier(tableName);
 
-                    var filePath = Path.Join(exportFolder, $"{fileName}.jsonl");
-
-                    using (var connection = factory.CreateConnection())
-                    {
-                        if (connection == null)
+                        var fileName = tableName;
+                        if (fileNamePrefixArg != null)
                         {
-                            throw new InvalidOperationException("Can not create connection to database.");
+                            fileName = fileNamePrefixArg + "_" + tableName;
                         }
 
-                        connection.ConnectionString = connectionString ?? _config.GetConnectionString("Database");
-                        await connection.OpenAsync();
-
-                        using (var command = connection.CreateCommand())
+                        if (withTimeStamp)
                         {
-                            command.CommandText = $@"SELECT * FROM {escapedTableName}";
+                            fileName = $"{fileName}_{DateTime.UtcNow:yyyyMMddTHHmmss}";
+                        }
 
-                            using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
+                        var filePath = Path.Join(exportFolder, $"{fileName}.jsonl");
+
+                        using (var connection = factory.CreateConnection())
+                        {
+                            if (connection == null)
                             {
-                                using (var file = File.CreateText(filePath))
+                                throw new InvalidOperationException("Can not create connection to database.");
+                            }
+
+                            connection.ConnectionString = connectionString ?? _config.GetConnectionString("Database");
+                            await connection.OpenAsync();
+
+                            using (var command = connection.CreateCommand())
+                            {
+                                command.CommandText = $@"SELECT * FROM {escapedTableName}";
+
+                                using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
                                 {
-                                    var tmpObj = new Dictionary<string, object>();
-                                    string columnName;
-                                    object columnValue;
-
-                                    while (await reader.ReadAsync(cancellationToken))
+                                    using (var file = File.CreateText(filePath))
                                     {
-                                        if (reader.HasRows)
-                                        {
-                                            for (int i = 0; i < reader.FieldCount; i++)
-                                            {
-                                                columnName = reader.GetName(i);
-                                                columnValue = reader.GetValue(i);
-                                                tmpObj[columnName] = columnValue;
-                                            }
+                                        var tmpObj = new Dictionary<string, object>();
+                                        string columnName;
+                                        object columnValue;
 
-                                            await file.WriteLineAsync(JsonConvert.SerializeObject(tmpObj));
+                                        while (await reader.ReadAsync(cancellationToken))
+                                        {
+                                            if (reader.HasRows)
+                                            {
+                                                for (int i = 0; i < reader.FieldCount; i++)
+                                                {
+                                                    columnName = reader.GetName(i);
+                                                    columnValue = reader.GetValue(i);
+                                                    tmpObj[columnName] = columnValue;
+                                                }
+
+                                                await file.WriteLineAsync(JsonConvert.SerializeObject(tmpObj));
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    Log.Information($"DONE: exporting {tableName} to {filePath}");
+                        Log.Information($"DONE: exporting {tableName} to {filePath}");
+                    }
+                    catch (Exception ex)
+                    {
+                        HandleException(ex, tableName, softFailTableNotFound ?? false);
+                    }
                 });
 
                 return 0;
             }
             catch (Exception ex)
             {
-                Log.Error("ERROR: {0} {1}", ex.Message, ex);
+                Log.Error("ERROR: {0}", ex.Message);
 
                 return 1;
             }
