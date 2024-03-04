@@ -31,7 +31,7 @@ namespace ExportNinja
 
             var tableNameOption = new Option<string[]>("--table")
             {
-                Description = "Table name(s) [space seperated]",
+                Description = "Table name(s) with optional file name (by adding :<fileName> after the table name) [space seperated]",
                 AllowMultipleArgumentsPerToken = true,
                 IsRequired = true
             };
@@ -68,7 +68,7 @@ namespace ExportNinja
 
             var softFailTableNotFound = new Option<bool>("--softFail")
             {
-                Description = "Only a warning is shown, when given table not found in DB. Skipping.",
+                Description = "Only a warning is shown, when given table is not found in DB. Skipping.",
                 IsRequired = false
             };
 
@@ -167,19 +167,27 @@ namespace ExportNinja
 
             try
             {
-                await Parallel.ForEachAsync(tableNameArg, cancellationToken, async (tableName, cancellationToken) =>
+                await Parallel.ForEachAsync(tableNameArg, cancellationToken, async (tableNameItem, cancellationToken) =>
                 {
+                    var tableName = tableNameItem;
+                    var tableFileName = tableNameItem;
+
                     try
                     {
+                        if (tableNameItem.Contains(":"))
+                        {
+                            tableName = tableNameItem.Split(':')[0];
+                            tableFileName = tableNameItem.Split(":")[1];
+                        }
+
                         Log.Information($"Start exporting {tableName}");
 
                         var builder = factory.CreateCommandBuilder();
-                        string escapedTableName = builder.QuoteIdentifier(tableName);
 
-                        var fileName = tableName;
+                        var fileName = tableFileName;
                         if (fileNamePrefixArg != null)
                         {
-                            fileName = fileNamePrefixArg + "_" + tableName;
+                            fileName = fileNamePrefixArg + "_" + tableFileName;
                         }
 
                         if (withTimeStamp)
@@ -201,6 +209,7 @@ namespace ExportNinja
 
                             using (var command = connection.CreateCommand())
                             {
+                                var escapedTableName = builder.QuoteIdentifier(tableName);
                                 command.CommandText = $@"SELECT * FROM {escapedTableName}";
 
                                 using (var reader = await command.ExecuteReaderAsync(CommandBehavior.Default))
