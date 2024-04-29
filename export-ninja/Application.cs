@@ -1,11 +1,11 @@
-using System.CommandLine;
-using System.Data;
-using System.Data.Common;
 using Microsoft.Extensions.Configuration;
 using MySql.Data.MySqlClient;
 using Newtonsoft.Json;
 using Oracle.ManagedDataAccess.Client;
 using Serilog;
+using System.CommandLine;
+using System.Data;
+using System.Data.Common;
 
 namespace ExportNinja
 {
@@ -72,6 +72,12 @@ namespace ExportNinja
                 IsRequired = false
             };
 
+            var tnsAdminPathOption = new Option<string>("--tnsAdminPath")
+            {
+                Description = "Oracle TNS_ADMIN path. [Only used for Oracle]",
+                IsRequired = false
+            };
+
             var rootCommand = new RootCommand("Export Ninja - Export given tables to JSON Lines files");
             rootCommand.AddOption(tableNameOption);
             rootCommand.AddOption(fileNamePrefixOption);
@@ -80,6 +86,7 @@ namespace ExportNinja
             rootCommand.AddOption(connectionStringOption);
             rootCommand.AddOption(withTimeStampOption);
             rootCommand.AddOption(softFailTableNotFound);
+            rootCommand.AddOption(tnsAdminPathOption);
 
             rootCommand.SetHandler(async (context) =>
             {
@@ -90,6 +97,7 @@ namespace ExportNinja
                 var connectionStringOptionValue = context.ParseResult.GetValueForOption(connectionStringOption);
                 var withTimeStampOptionValue = context.ParseResult.GetValueForOption(withTimeStampOption);
                 var softFailTableNotFoundValue = context.ParseResult.GetValueForOption(softFailTableNotFound);
+                var tnsAdminPathOptionValue = context.ParseResult.GetValueForOption(tnsAdminPathOption);
 
                 var ct = context.GetCancellationToken();
                 returnCode = await RunApplicationAsync(
@@ -100,6 +108,7 @@ namespace ExportNinja
                     connectionStringOptionValue,
                     withTimeStampOptionValue,
                     softFailTableNotFoundValue,
+                    tnsAdminPathOptionValue,
                     ct);
             });
 
@@ -145,14 +154,21 @@ namespace ExportNinja
             string? connectionString,
             bool withTimeStamp,
             bool? softFailTableNotFound,
+            string? tnsAdminPath,
             CancellationToken cancellationToken)
         {
-            if(tableNameArg == null || databaseType == null)
+            if (tableNameArg == null || databaseType == null)
             {
                 throw new InvalidDataException("Please provide table name or database type");
             }
 
             factory = DbProviderFactories.GetFactory(databaseType);
+
+            if (tnsAdminPath != null || tnsAdminPath != string.Empty)
+            {
+                OracleConfiguration.TnsAdmin = tnsAdminPath;
+                Log.Information($"OracleConfiguration.TnsAdmin is set to {tnsAdminPath}");
+            }
 
             var parallelOptions = new ParallelOptions()
             {
