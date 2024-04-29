@@ -1,6 +1,6 @@
 # Export Ninja
 
-CLI tool to export database tables to JSON Lines files - The .Net 8 way
+CLI tool to export database tables to JSON Lines files - The .Net way
 
 ## Description
 
@@ -32,6 +32,7 @@ Options:
   --connectionString <connectionString>  DB connection string [You can also use appsettings.json]
   --withTimeStamp                        Option to add a time stamp suffix to exported files
   --softFail                             Only a warning is shown, when given table is not found in DB. Skipping.
+  --tnsAdminPath                         Oracle TNS_ADMIN path. [Only used for Oracle]
   --version                              Show version information
   -?, -h, --help                         Show help and usage information
 ```
